@@ -1,6 +1,6 @@
 #Grab labels from an .aux file so that they can be included in 
 # another .tex file.
-# The output should be pasted into the other .tex file enclosed within
+# The output should be pasted into the premable of the other .tex file enclosed within
 #   \makeatletter
 #   \protected@write\@auxout{}{
 #   ...
