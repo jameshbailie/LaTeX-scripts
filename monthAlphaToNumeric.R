@@ -27,9 +27,17 @@ replace_months <- function(input_filepath, output_filepath) {
     "dec" = 12, "december" = 12
   )
   
-  modified_lines <- gsubfn(pattern = "month\\s*=\\s*\\{(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)\\},", 
-                           replacement = function(m) paste0("month = {", month_map[tolower(gsub("month\\s*=\\s*\\{|\\},", "", m))], "},"),
+  #replace line "month = {jan}," (or similar) with "month = {1},"
+  modified_lines <- gsubfn(pattern = "month\\s*=\\s*\\{\\s*(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)\\s*\\}\\s*,\\s*", 
+                           replacement = function(m) paste0("month = {", month_map[tolower(gsub("month\\s*=\\s*\\{\\s*|\\s*\\}\\s*,\\s*", "", m))], "},"),
                            x = input_lines, 
+                           ignore.case = TRUE)
+  # Some explanation: \\s* matches zero or more whitespace, a|b matches a or b (so in the replacement gsub (line 32) we are replacing "month = " or "," with "")
+  
+  #replace mine "month = jan," with "month = {1},"
+  modified_lines <- gsubfn(pattern = "month\\s*=\\s*(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december),", 
+                           replacement = function(m) paste0("month = {", month_map[tolower(gsub("month\\s*=\\s*|\\s*,\\s*", "", m))], "},"),
+                           x = modified_lines, 
                            ignore.case = TRUE)
   
   # Write the modified content to a new file
