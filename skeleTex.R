@@ -133,7 +133,7 @@ filter_tex_file <- function(input_file, output_file) {
       while (min(i) <= nchar(s)) {
         ch <- substring(s, i, i)
         depth <- depth + (ch == open_brace) - (ch == close_brace)
-        end <- (depth == 0)*(ch == close_brace)*(end == -1)*i-1
+        end <- (depth == 0)*(ch == close_brace)*(end == -1)*i+end
         i <- i + 1
       }
       
