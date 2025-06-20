@@ -1,5 +1,4 @@
 # Things to add, possibly:
-# - Keep section labels
 # - At the moment, \begin{document}, \end{document} and \appendix commands are
 #   assumed to be on their own line, without any other text
 
@@ -11,6 +10,10 @@
 #' including variants with optional arguments (e.g., \section[short]{long}).
 #' 
 #' Everything before \begin{document} and after \end{document} is preserved unchanged.
+#' 
+#' Labels for structural commands are preserved (assuming that there is only
+#' whitespace between the command and the label -- if not, the label will be
+#' deleted.) If there are multiple labels, only the first one is preserved.
 #'
 #' @param input_file Path to the input .tex file
 #' @param output_file Path to the output .tex file where filtered content will be saved
@@ -45,6 +48,7 @@ filter_tex_file <- function(input_file, output_file) {
   
   # Track comment environment state
   in_comment_block <- 0
+  searching_for_label <- FALSE
   
   # Function to extract matches with original indentation
   extract_with_indent <- function(line) {
@@ -59,8 +63,8 @@ filter_tex_file <- function(input_file, output_file) {
     matches <- gregexpr("\\\\appendix", line, perl = TRUE)[[1]]
     if (matches[1] != -1) return(c(paste0(indent, "\\appendix"), paste0(indent, "")))
     
-    #This is not necessary, but to avoid running the rest of this function,
-    # exit now if the line is only whitespace:
+    # Exit now if the line is only whitespace:
+    # (This line is necessary for searching_for_label to work correctly.)
     if (trimws(line) == "") return(NULL)
     
     #Recursively remove comment blocks:
@@ -106,26 +110,9 @@ filter_tex_file <- function(input_file, output_file) {
     }
     line <- remove_comment_blocks(line)
     
-    #Look for any matches to \section or other similar commands:
-    matches <- gregexpr(keep_pattern, line, perl = TRUE)[[1]]
-    if (matches[1] == -1) return(NULL)
-
-    #Find the ends of the commands
-    indices_after_cmds <- as.vector(matches + attr(matches, "match.length"))
-    
-    #Include star versions of the commands:
-    indices_after_cmds <- indices_after_cmds + 
-      (substring(line, indices_after_cmds, indices_after_cmds) == "*")
-    
-    #Filter out any commands which have the commands we actually want as prefixes:
-    starts_with_bracket <- substring(line, indices_after_cmds, indices_after_cmds) == "["
-    starts_with_brace <- substring(line, indices_after_cmds, indices_after_cmds) == "{"
-    valid_cmds <- which(starts_with_bracket | starts_with_brace)
-    
-    matches <- matches[valid_cmds]
-    indices_after_cmds <- indices_after_cmds[valid_cmds]
-    
+    #Helper functions:
     get_end_of_brace_block <- function(s, start, open_brace, close_brace) {
+      #Returns the index after the close_brace
       depth <- rep(0, length(start))
       i <- start
       end <- rep(-1, length(start))
@@ -144,16 +131,91 @@ filter_tex_file <- function(input_file, output_file) {
       
       return(end)
     }
+    find_label <- function(line) {
+      #Returns the \label command at the start of the line, if there is one.
+      #Otherwise returns ""
+      
+      #Note that line could be vectorised (i.e. multiple lines)
+      #The output is the same length as line
+      
+      line_trimmed <- trimws(line) 
+      match_label <- gregexpr("\\\\label", line_trimmed, perl = TRUE)
+      
+      #label <- 
+      sapply(seq(1,length(match_label)), function(i) {
+        #If the label is at the start of the line (excluding whitespace), then save it:
+        if (match_label[[i]][1] == 1) {
+          index_after_label <- get_end_of_brace_block(line_trimmed[[i]], 7, "{", "}")
+          substr(line_trimmed[[i]], 1, index_after_label-1)
+        } else ""
+      })
+      #return(match_label, label)
+    }
+    
+    #Search for the section label at the start of the line:
+    label_at_start <- ""
+    if (searching_for_label) {
+      label_at_start <- find_label(line)
+      if (trimws(line) != "") {
+        searching_for_label <<- FALSE
+      }
+    }
+    
+    #Look for any matches to \section or other similar commands:
+    #(Note this, and everything below, is vectorised, since we want to save all such commands)
+    matches <- gregexpr(keep_pattern, line, perl = TRUE)[[1]] 
+    if (matches[1] == -1) {
+      if (label_at_start != "") {
+        return(paste0(indent, label_at_start))
+      }
+      else return(NULL)
+    }
+
+    #Find the ends of the \section or similar commands
+    indices_after_cmds <- as.vector(matches + attr(matches, "match.length"))
+    
+    #Include star versions of the commands:
+    indices_after_cmds <- indices_after_cmds + 
+      (substring(line, indices_after_cmds, indices_after_cmds) == "*")
+    
+    #Filter out any commands which have the commands we actually want as prefixes:
+    starts_with_bracket <- substring(line, indices_after_cmds, indices_after_cmds) == "["
+    starts_with_brace <- substring(line, indices_after_cmds, indices_after_cmds) == "{"
+    valid_cmds <- which(starts_with_bracket | starts_with_brace)
+    
+    matches <- matches[valid_cmds]
+    indices_after_cmds <- indices_after_cmds[valid_cmds]
     
     indices_after_cmds <- get_end_of_brace_block(line, indices_after_cmds, "[", "]")
     indices_after_cmds <- get_end_of_brace_block(line, indices_after_cmds, "{", "}")
     
     matched_cmds <- substring(line, matches, indices_after_cmds-1)
     
+    #Find any section labels between the matched commands (and after last matched command):
+    text_between_matched_cmds <- substring(line,
+                                           indices_after_cmds,
+                                           c(matches[-1]-1, nchar(line)))
+    intermediate_labels <- find_label(text_between_matched_cmds)
+    
+    #We are still looking for the label for the last matched command if there is only
+    # whitespace after the last matched command
+    if (trimws(text_between_matched_cmds[length(text_between_matched_cmds)]) == "") {
+      searching_for_label <<- TRUE
+    }
+    
     # For each match: keep indent, add two blank indented lines
-    unlist(lapply(matched_cmds, function(cmd) {
-      c(paste0(indent, cmd), paste0(indent, ""), paste0(indent, ""))
+    return_lines <- unlist(lapply(seq(1,length(matched_cmds)), function(i) {
+      c(paste0(indent, matched_cmds[i], intermediate_labels[i]), paste0(indent, ""), paste0(indent, ""))
     }))
+    return_lines <- return_lines[1:(length(return_lines)-2)]
+    
+    if (label_at_start != "") {
+      return_lines <- c(paste0(indent, label_at_start), paste0(indent, ""), paste0(indent, ""), return_lines)
+    } else {
+      return_lines <- c(paste0(indent, ""), paste0(indent, ""), return_lines)
+    }
+    
+    return(return_lines)
   }
   
   # Apply extraction and flatten
@@ -174,4 +236,4 @@ filter_tex_file <- function(input_file, output_file) {
 # filter_tex_file("test.tex", "test_output.tex")
 
 # setwd("C:\\Users\\User\\Documents\\Overleaf\\DPSamplevsPop")
-# filter_tex_file("mainRemoved.tex", "test_output.tex")
+# filter_tex_file("main.tex", "test_output.tex")
